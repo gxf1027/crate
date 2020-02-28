@@ -74,12 +74,17 @@ import io.crate.expression.scalar.timestamp.NowFunction;
 import io.crate.expression.scalar.timestamp.TimezoneFunction;
 import io.crate.metadata.FunctionIdent;
 import io.crate.metadata.FunctionImplementation;
+import io.crate.metadata.FunctionInfo;
 import io.crate.metadata.FunctionName;
 import io.crate.metadata.FunctionResolver;
+import io.crate.metadata.functions.NamedSignature;
+import io.crate.metadata.functions.Signature;
+import io.crate.metadata.functions.SignatureList;
 import org.elasticsearch.common.inject.AbstractModule;
 import org.elasticsearch.common.inject.multibindings.MapBinder;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 public class ScalarFunctionModule extends AbstractModule {
@@ -88,6 +93,11 @@ public class ScalarFunctionModule extends AbstractModule {
     private Map<FunctionName, FunctionResolver> resolver = new HashMap<>();
     private MapBinder<FunctionIdent, FunctionImplementation> functionBinder;
     private MapBinder<FunctionName, FunctionResolver> resolverBinder;
+
+    private HashMap<FunctionName, SignatureList> signaturesByFunctionName = new HashMap<>();
+    private HashMap<NamedSignature, FunctionImplementation> functionImplementations = new HashMap<>();
+    private MapBinder<FunctionName, SignatureList> signaturesBinder;
+    private MapBinder<NamedSignature, FunctionImplementation> implementationsBinder;
 
     public void register(FunctionImplementation impl) {
         functions.put(impl.info().ident(), impl);
@@ -100,6 +110,18 @@ public class ScalarFunctionModule extends AbstractModule {
     public void register(FunctionName qualifiedName, FunctionResolver functionResolver) {
         resolver.put(qualifiedName, functionResolver);
     }
+
+
+    public void register(FunctionName qualifiedName, Signature signature, FunctionImplementation implementation) {
+        List<Signature> signatures = signaturesByFunctionName.computeIfAbsent(qualifiedName, k -> new SignatureList());
+        if (signatures.contains(signature)) {
+            throw new IllegalArgumentException(
+                "Given signature is already registered for function name=" + qualifiedName + ": " + signature);
+        }
+        signatures.add(signature);
+        functionImplementations.put(new NamedSignature(qualifiedName, signature), implementation);
+    }
+
 
     @Override
     protected void configure() {
@@ -195,7 +217,6 @@ public class ScalarFunctionModule extends AbstractModule {
         resolverBinder = MapBinder.newMapBinder(binder(), FunctionName.class, FunctionResolver.class);
         for (Map.Entry<FunctionIdent, FunctionImplementation> entry : functions.entrySet()) {
             functionBinder.addBinding(entry.getKey()).toInstance(entry.getValue());
-
         }
         for (Map.Entry<FunctionName, FunctionResolver> entry : resolver.entrySet()) {
             resolverBinder.addBinding(entry.getKey()).toInstance(entry.getValue());
@@ -204,6 +225,20 @@ public class ScalarFunctionModule extends AbstractModule {
         // clear registration maps
         functions = null;
         resolver = null;
+
+        // V2
+        signaturesBinder = MapBinder.newMapBinder(binder(), FunctionName.class, SignatureList.class);
+        implementationsBinder = MapBinder.newMapBinder(binder(), NamedSignature.class, FunctionImplementation.class);
+        for (Map.Entry<FunctionName, SignatureList> entry : signaturesByFunctionName.entrySet()) {
+            signaturesBinder.addBinding(entry.getKey()).toInstance(entry.getValue());
+        }
+        for (Map.Entry<NamedSignature, FunctionImplementation> entry : functionImplementations.entrySet()) {
+            implementationsBinder.addBinding(entry.getKey()).toInstance(entry.getValue());
+        }
+
+        // clear registration maps
+        signaturesByFunctionName = null;
+        functionImplementations = null;
     }
 
 }

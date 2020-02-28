@@ -95,22 +95,25 @@ class ArrayCatFunction extends Scalar<List<Object>, List<Object>> {
                 Preconditions.checkArgument(dataTypes.get(i) instanceof ArrayType, String.format(Locale.ENGLISH,
                     "Argument %d of the array_cat function cannot be converted to array", i + 1));
             }
-
-            DataType innerType0 = ((ArrayType) dataTypes.get(0)).innerType();
-            DataType innerType1 = ((ArrayType) dataTypes.get(1)).innerType();
-
-            Preconditions.checkArgument(
-                !innerType0.equals(DataTypes.UNDEFINED) || !innerType1.equals(DataTypes.UNDEFINED),
-                "One of the arguments of the array_cat function can be of undefined inner type, but not both");
-
-            if (!innerType0.equals(DataTypes.UNDEFINED)) {
-                Preconditions.checkArgument(innerType1.isConvertableTo(innerType0),
-                    String.format(Locale.ENGLISH,
-                        "Second argument's inner type (%s) of the array_cat function cannot be converted to the first argument's inner type (%s)",
-                        innerType1, innerType0));
-            }
+            validateInnerTypes(dataTypes);
 
             return new ArrayCatFunction(createInfo(dataTypes));
+        }
+    }
+
+    static void validateInnerTypes(List<DataType> dataTypes) {
+        DataType innerType0 = ((ArrayType) dataTypes.get(0)).innerType();
+        DataType innerType1 = ((ArrayType) dataTypes.get(1)).innerType();
+
+        Preconditions.checkArgument(
+            !innerType0.equals(DataTypes.UNDEFINED) || !innerType1.equals(DataTypes.UNDEFINED),
+            "One of the arguments of the array_cat function can be of undefined inner type, but not both");
+
+        if (!innerType0.equals(DataTypes.UNDEFINED)) {
+            Preconditions.checkArgument(innerType1.isConvertableTo(innerType0),
+                                        String.format(Locale.ENGLISH,
+                                                      "Second argument's inner type (%s) of the array_cat function cannot be converted to the first argument's inner type (%s)",
+                                                      innerType1, innerType0));
         }
     }
 }

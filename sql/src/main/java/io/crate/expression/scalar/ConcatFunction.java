@@ -21,7 +21,7 @@
 
 package io.crate.expression.scalar;
 
-import com.google.common.base.Preconditions;
+import com.google.common.collect.Lists;
 import io.crate.data.Input;
 import io.crate.exceptions.ConversionException;
 import io.crate.expression.symbol.FuncArg;
@@ -31,18 +31,21 @@ import io.crate.expression.symbol.Symbol;
 import io.crate.metadata.FunctionIdent;
 import io.crate.metadata.FunctionImplementation;
 import io.crate.metadata.FunctionInfo;
+import io.crate.metadata.FunctionName;
 import io.crate.metadata.FunctionResolver;
 import io.crate.metadata.Scalar;
 import io.crate.metadata.TransactionContext;
+import io.crate.metadata.functions.Signature;
 import io.crate.metadata.functions.params.FuncParams;
 import io.crate.metadata.functions.params.Param;
+import io.crate.metadata.functions.params.TypeParam;
 import io.crate.types.ArrayType;
 import io.crate.types.DataType;
 import io.crate.types.DataTypes;
+import io.crate.types.StringType;
 
 import javax.annotation.Nullable;
 import java.util.List;
-import java.util.Locale;
 
 public abstract class ConcatFunction extends Scalar<String, String> {
 
@@ -50,7 +53,43 @@ public abstract class ConcatFunction extends Scalar<String, String> {
     private FunctionInfo functionInfo;
 
     public static void register(ScalarFunctionModule module) {
-        module.register(NAME, new Resolver());
+        //module.register(NAME, new Resolver());
+
+        // V2
+        FunctionName name = new FunctionName(null, NAME);
+
+        var str = new TypeParam("any_str", t -> t.id() == StringType.ID);
+        module.register(
+            name,
+            new Signature(str, str),
+            new StringConcatFunction(
+                new FunctionInfo(
+                    new FunctionIdent(NAME, List.of(StringType.INSTANCE, StringType.INSTANCE)),
+                    DataTypes.STRING)));
+
+        var str_variadic = new TypeParam("any_str_var", t -> t.id() == StringType.ID, TypeParam.Mode.VARIADIC);
+        module.register(
+            name,
+            new Signature(str, str_variadic),
+            new GenericConcatFunction(
+                new FunctionInfo(
+                    new FunctionIdent(NAME, List.of(StringType.INSTANCE, StringType.INSTANCE)),
+                    DataTypes.STRING)));
+
+        for (DataType<?> dataType : DataTypes.PRIMITIVE_TYPES) {
+            var arrType = new ArrayType<>(dataType);
+            var arr = new TypeParam(
+                "any_array",
+                t -> t.id() == ArrayType.ID && ((ArrayType) t).innerType().id() == dataType.id());
+            module.register(
+                name,
+                new Signature(
+                    List.of(arr, arr),
+                    args -> ArrayCatFunction.validateInnerTypes(Lists.transform(args, FuncArg::valueType))),
+                new ArrayCatFunction(
+                    ArrayCatFunction.createInfo(List.of(arrType, arrType))
+                ));
+        }
     }
 
     ConcatFunction(FunctionInfo functionInfo) {
@@ -152,20 +191,7 @@ public abstract class ConcatFunction extends Scalar<String, String> {
             } else if (dataTypes.size() == 2 && dataTypes.get(0) instanceof ArrayType &&
                        dataTypes.get(1) instanceof ArrayType) {
 
-                DataType innerType0 = ((ArrayType) dataTypes.get(0)).innerType();
-                DataType innerType1 = ((ArrayType) dataTypes.get(1)).innerType();
-
-                Preconditions.checkArgument(
-                    !innerType0.equals(DataTypes.UNDEFINED) || !innerType1.equals(DataTypes.UNDEFINED),
-                    "When concatenating arrays, one of the two arguments can be of undefined inner type, but not both");
-
-                if (!innerType0.equals(DataTypes.UNDEFINED)) {
-                    Preconditions.checkArgument(innerType1.isConvertableTo(innerType0),
-                        String.format(Locale.ENGLISH,
-                            "Second argument's inner type (%s) of the array_cat function cannot be converted to the first argument's inner type (%s)",
-                            innerType1, innerType0));
-                }
-
+                ArrayCatFunction.validateInnerTypes(dataTypes);
                 return new ArrayCatFunction(ArrayCatFunction.createInfo(dataTypes));
             } else {
                 return new GenericConcatFunction(new FunctionInfo(new FunctionIdent(NAME, dataTypes), DataTypes.STRING));
