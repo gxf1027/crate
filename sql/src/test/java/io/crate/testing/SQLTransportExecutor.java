@@ -39,10 +39,6 @@ import io.crate.metadata.SearchPath;
 import io.crate.metadata.pgcatalog.PgCatalogSchemaInfo;
 import io.crate.protocols.postgres.types.PGType;
 import io.crate.protocols.postgres.types.PGTypes;
-import io.crate.shade.org.postgresql.geometric.PGpoint;
-import io.crate.shade.org.postgresql.util.PGobject;
-import io.crate.shade.org.postgresql.util.PSQLException;
-import io.crate.shade.org.postgresql.util.ServerErrorMessage;
 import io.crate.types.DataType;
 import io.crate.types.DataTypes;
 import io.netty.handler.codec.http.HttpResponseStatus;
@@ -68,6 +64,10 @@ import org.elasticsearch.common.xcontent.json.JsonXContent;
 import org.hamcrest.Matchers;
 import org.locationtech.spatial4j.context.jts.JtsSpatialContext;
 import org.locationtech.spatial4j.shape.impl.PointImpl;
+import org.postgresql.geometric.PGpoint;
+import org.postgresql.util.PGobject;
+import org.postgresql.util.PSQLException;
+import org.postgresql.util.ServerErrorMessage;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -270,7 +270,7 @@ public class SQLTransportExecutor {
             } else {
                 for (int i = 0; i < bulkArgs.length; i++) {
                     session.bind(UNNAMED, UNNAMED, Arrays.asList(bulkArgs[i]), null);
-                    ResultReceiver resultReceiver = new BulkRowCountReceiver(rowCounts, i);
+                    ResultReceiver<?> resultReceiver = new BulkRowCountReceiver(rowCounts, i);
                     session.execute(UNNAMED, 0, resultReceiver);
                 }
             }
@@ -318,7 +318,7 @@ public class SQLTransportExecutor {
                 }
             }
         } catch (PSQLException e) {
-            LOGGER.error("Error executing stmt={} args={}", stmt, Arrays.toString(args));
+            LOGGER.error("Error executing stmt={} args={} error={}", stmt, Arrays.toString(args), e);
             ServerErrorMessage serverErrorMessage = e.getServerErrorMessage();
             final StackTraceElement[] stacktrace;
             //noinspection ThrowableNotThrown add the test-call-chain to the stack to be able
@@ -346,19 +346,22 @@ public class SQLTransportExecutor {
     }
 
     private static Object toJdbcCompatObject(Connection connection, Object arg) {
-        if (arg == null || arg instanceof Map) {
+        if (arg == null) {
             return arg;
+        }
+        if (arg instanceof Map) {
+            return DataTypes.STRING.value(arg);
         }
         if (arg.getClass().isArray()) {
             arg = Arrays.asList((Object[]) arg);
         }
         if (arg instanceof Collection) {
-            Collection values = (Collection) arg;
+            Collection<?> values = (Collection<?>) arg;
             if (values.isEmpty()) {
-                return null; // TODO: can't insert empty list without knowing the type
+                return null; // Can't insert empty list without knowing the type
             }
             List<Object> convertedValues = new ArrayList<>(values.size());
-            PGType pgType = null;
+            PGType<?> pgType = null;
             for (Object value : values) {
                 convertedValues.add(toJdbcCompatObject(connection, value));
                 if (pgType == null && value != null) {
@@ -439,6 +442,7 @@ public class SQLTransportExecutor {
                 value = intValue.shortValue();
                 break;
             case "byte":
+            case "char":
                 value = resultSet.getByte(i + 1);
                 break;
             case "_json":
